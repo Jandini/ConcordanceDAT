@@ -57,6 +57,11 @@ public static class DATFile
                     return []; // skip header row
                 }
 
+                // strict column-count validation
+                if (fields.Count != headers.Count)
+                    throw new FormatException($"Invalid field count: got {fields.Count}, expected {headers.Count}. " +
+                                              "Each record must have the same number of columns as the header and end with a line break.");
+
                 var dict = new Dictionary<string, string>(headers.Count, StringComparer.OrdinalIgnoreCase);
                 var count = Math.Max(headers.Count, fields.Count);
                 for (int i = 0; i < count; i++)

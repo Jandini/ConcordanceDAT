@@ -26,16 +26,12 @@ internal class Main(ILogger<Main> logger)
             {
                 var rows = DATFile.ReadAsync(stream, cancel: cancellationToken);
 
-
                 await foreach (var row in rows)
                 {
                     rowNumber++;
 
-                    if (rowNumber % 4096 == 0)
-                    {
-                        //logger.LogInformation("{@row}", row);
+                    if (rowNumber % 8192 == 0)
                         Console.Title = rowNumber.ToString();
-                    }
                 }
             }
 
