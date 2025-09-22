@@ -4,10 +4,9 @@ using System.Diagnostics;
 
 internal class Main(ILogger<Main> logger)
 {
-
     public async Task<int> RunAsync(CancellationToken cancellationToken)
     {      
-        var datFiles = Directory.GetFiles(@"C:\Temp\load\dat", "*.dat");
+        var datFiles = Directory.GetFiles(@"C:\DAT", "*.dat");
         var totalRows = 0;
         var totalWatch = new Stopwatch();
 
@@ -22,7 +21,7 @@ internal class Main(ILogger<Main> logger)
 
             int rowNumber = 0;
 
-            using (var stream = new FileStream(datFile, FileMode.Open, FileAccess.Read, FileShare.None, 1024 * 1024))
+            await using (var stream = File.OpenRead(datFile))
             {
                 var rows = DATFile.ReadAsync(stream, cancel: cancellationToken);
 
