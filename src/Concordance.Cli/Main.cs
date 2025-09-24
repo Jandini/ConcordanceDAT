@@ -5,7 +5,7 @@ using System.Diagnostics;
 
 internal class Main(ILogger<Main> logger)
 {
-    public async Task<int> RunAsync(CancellationToken cancellationToken)
+    public async Task RunAsync(CancellationToken cancellationToken)
     {
         // Discover input files
         var datFiles = Directory.GetFiles(@"c:\dat", "*.dat");
@@ -29,7 +29,12 @@ internal class Main(ILogger<Main> logger)
 
         await Parallel.ForEachAsync(datFiles, parallel, async (datFile, ct) =>
         {
+       
             logger.LogInformation("Reading {file}", datFile);
+
+            var header = await DatFile.GetHeaderAsync(datFile, ct);
+
+            logger.LogInformation("Found {count} fields in the header.", header.Count);
 
             var sw = Stopwatch.StartNew();
             var lastProgressUpdate = Stopwatch.StartNew();
@@ -88,7 +93,6 @@ internal class Main(ILogger<Main> logger)
 
         foreach (var error in errors)
             logger.LogError("{file:l}: {error:l}", error.Key, error.Value);
-
-        return 0;
+        
     }
 }

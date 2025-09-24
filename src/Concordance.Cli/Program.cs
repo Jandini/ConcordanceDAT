@@ -3,9 +3,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Sinks.SystemConsole.Themes;
-using Serilog.Sinks.File;
-
-int exitCode = byte.MaxValue;
 
 try
 {
@@ -36,7 +33,7 @@ try
             }
         };
 
-        exitCode = await serviceProvider
+        await serviceProvider
             .GetRequiredService<Main>()
             .RunAsync(cancellationTokenSource.Token);
     }
@@ -51,4 +48,4 @@ catch (Exception ex)
     Console.WriteLine(ex.Message);
 }
 
-return exitCode;
+
