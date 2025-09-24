@@ -37,7 +37,7 @@ internal class Main(ILogger<Main> logger)
 
             try
             {
-                await foreach (var _ in DatFile1.ReadAsync(datFile, ct))
+                await foreach (var _ in DatFile.ReadAsync(datFile, ct))
                 {
                     rowNumber++;
 
