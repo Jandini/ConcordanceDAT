@@ -356,6 +356,7 @@ public static class DatFile
         if (bytes >= 2 && buf[0] == 0xC3 && buf[1] == 0xBE)
             return Utf8Strict();
 
-        throw new FormatException("Invalid Concordance DAT: file must start with the quote character U+00FE after an optional BOM.");
+        throw new FormatException("Invalid Concordance DAT: after an optional BOM, the file must begin with the quote character U+00FE (þ). " 
+            + "The detected byte pattern does not match UTF-8 or UTF-16 (LE/BE) with U+00FE at the start. ");
     }
 }
