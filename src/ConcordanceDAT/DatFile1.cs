@@ -51,7 +51,7 @@ public sealed record DatFileOptions
 /// It supports UTF-8 and UTF-16 encodings, honors the Concordance format rules, and yields
 /// one dictionary per data record where keys come from the header row.
 /// </summary>
-public static class DatFile
+public static class DatFile1
 {
 
 
