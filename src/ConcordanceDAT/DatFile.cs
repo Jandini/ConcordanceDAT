@@ -37,12 +37,11 @@ public sealed record DatFileOptions
     /// </summary>
     public static DatFileOptions Default { get; } = new DatFileOptions();
 
-    internal DatFileOptions Clamp()
-        => this with
-        {
-            ReaderBufferChars = Math.Clamp(ReaderBufferChars, 4 * 1024, 1 * 1024 * 1024),
-            ParseChunkChars = Math.Clamp(ParseChunkChars, 4 * 1024, 1 * 1024 * 1024),
-        };
+    internal DatFileOptions Clamp() => this with
+    {
+        ReaderBufferChars = Math.Clamp(ReaderBufferChars, 4 * 1024, 1 * 1024 * 1024),
+        ParseChunkChars = Math.Clamp(ParseChunkChars, 4 * 1024, 1 * 1024 * 1024),
+    };
 }
 
 /// <summary>
@@ -153,7 +152,7 @@ public static class DatFile
     private static async IAsyncEnumerable<Dictionary<string, string>> GetRowsAsync(
         StreamReader reader,
         int parseChunkChars,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancel)
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var pool = ArrayPool<char>.Shared;
         var buffer = pool.Rent(parseChunkChars);
@@ -200,7 +199,7 @@ public static class DatFile
             {
                 for (int i = 0; i < read; i++)
                 {
-                    cancel.ThrowIfCancellationRequested();
+                    cancellationToken.ThrowIfCancellationRequested();
 
                     char ch = buffer[i];
 
