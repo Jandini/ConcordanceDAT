@@ -157,7 +157,7 @@ public sealed record DatFileOptions
 
 ## Error handling
 
-* Throws `FormatException` if a record’s field count does not match the header.
+* Throws `FormatException` if a record's field count does not match the header.
 * Throws `FormatException` if the file does not begin (after optional BOM) with the required `U+00FE` quote character.
 * Honors `CancellationToken` during async enumeration and header reading.
 
