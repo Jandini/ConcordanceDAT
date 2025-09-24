@@ -1,4 +1,4 @@
-# Concordance.Dat
+# Concordance.DAT
 
 Asynchronous, streaming reader for **Concordance DAT** files targeting **.NET 8**.
 This library centralizes configuration via `DatFileOptions` (with sensible defaults) and follows .NET naming conventions: **namespace** `Concordance.Dat`, **type** `DatFile`.
