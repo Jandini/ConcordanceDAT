@@ -277,6 +277,155 @@ public static class DatFile
         }
     }
 
+
+
+
+    /// <summary>
+    /// Reads only the header from a Concordance DAT file (by path) and returns the list of field names
+    /// in file order. Uses a small fixed buffer since only the first record is needed.
+    /// </summary>
+    /// <param name="path">File system path to a Concordance DAT file.</param>
+    /// <param name="cancel">Cancellation token to cooperatively cancel the operation.</param>
+    /// <returns>A read-only list of header field names in file order.</returns>
+    public static async Task<IReadOnlyList<string>> GetHeaderAsync(
+        string path,
+        CancellationToken cancel = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+
+        // Open with sensible defaults; header is tiny so defaults are fine here.
+        await using var fs = File.Open(path, DatFileOptions.Default.File);
+        return await GetHeaderAsync(fs, cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads only the header from a Concordance DAT stream and returns the list of field names
+    /// in file order. Uses a small fixed buffer since only the first record is needed.
+    /// </summary>
+    /// <param name="stream">Readable, seekable stream positioned at the start of a Concordance DAT file.</param>
+    /// <param name="cancellationToken">Cancellation token to cooperatively cancel the operation.</param>
+    /// <returns>A read-only list of header field names in file order.</returns>
+    public static async Task<IReadOnlyList<string>> GetHeaderAsync(
+        Stream stream,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        if (!stream.CanRead) throw new ArgumentException("Stream must be readable.", nameof(stream));
+
+        // Detect encoding and position stream after BOM if present
+        var encoding = DetectEncoding(stream);
+
+        // Small fixed buffers are sufficient for the header
+        const int ReaderBufferChars = 8 * 1024;
+        const int ParseChunkChars = 8 * 1024;
+
+        using var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: false, bufferSize: ReaderBufferChars, leaveOpen: false);
+
+        var pool = ArrayPool<char>.Shared;
+        var buffer = pool.Rent(ParseChunkChars);
+        try
+        {
+            var sep = (char)0x14; // field separator
+            var quote = (char)0xFE; // field quote
+
+            var inQuotes = false;
+            var lastWasCR = false;
+
+            var field = new StringBuilder(1024);
+            var fields = new List<string>(64);
+
+            void EndField()
+            {
+                fields.Add(field.ToString());
+                field.Clear();
+            }
+
+            // Returns header snapshot and completes
+            static IReadOnlyList<string> SnapshotHeader(List<string> f)
+                => Array.AsReadOnly(f.ToArray());
+
+            int read;
+            while ((read = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
+            {
+                for (int i = 0; i < read; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    char ch = buffer[i];
+
+                    if (lastWasCR)
+                    {
+                        lastWasCR = false;
+                        if (ch == '\n' && !inQuotes)
+                        {
+                            // header terminated by CRLF
+                            EndField();
+                            return SnapshotHeader(fields);
+                        }
+                        else
+                        {
+                            field.Append('\r'); // CR was data
+                        }
+                    }
+
+                    if (ch == quote)
+                    {
+                        if (inQuotes && i + 1 < read && buffer[i + 1] == quote)
+                        {
+                            field.Append(quote); // escaped quote
+                            i++;
+                        }
+                        else
+                        {
+                            inQuotes = !inQuotes; // toggle
+                        }
+                    }
+                    else if (!inQuotes && ch == sep)
+                    {
+                        EndField();
+                    }
+                    else if (!inQuotes && ch == '\n')
+                    {
+                        // header terminated by LF
+                        EndField();
+                        return SnapshotHeader(fields);
+                    }
+                    else if (ch == '\r')
+                    {
+                        if (!inQuotes) lastWasCR = true; // maybe CRLF
+                        else field.Append('\r');
+                    }
+                    else
+                    {
+                        field.Append(ch);
+                    }
+                }
+            }
+
+            // EOF handling for header-only read:
+
+            // Lone trailing CR as terminator
+            if (lastWasCR && !inQuotes)
+            {
+                EndField();
+                return SnapshotHeader(fields);
+            }
+
+            // Header without trailing newline (allowed)
+            if (field.Length > 0 || fields.Count > 0)
+            {
+                EndField();
+                return SnapshotHeader(fields);
+            }
+
+            throw new FormatException("Empty or invalid Concordance DAT. Header row not found.");
+        }
+        finally
+        {
+            pool.Return(buffer);
+        }
+    }
+
+
     /// <summary>
     /// Detects text encoding for a Concordance DAT stream and positions the stream correctly relative to any BOM.
     ///
@@ -355,7 +504,7 @@ public static class DatFile
         if (bytes >= 2 && buf[0] == 0xC3 && buf[1] == 0xBE)
             return Utf8Strict();
 
-        throw new FormatException("Invalid Concordance DAT: after an optional BOM, the file must begin with the quote character U+00FE (þ). " 
+        throw new FormatException("Invalid Concordance DAT. After an optional BOM, the file must begin with the quote character U+00FE." 
             + "The detected byte pattern does not match UTF-8 or UTF-16 (LE/BE) with U+00FE at the start. ");
     }
 }
