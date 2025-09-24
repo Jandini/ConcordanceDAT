@@ -83,12 +83,12 @@ public static class DatFile
     /// </summary>
     /// <param name="path">File system path to a Concordance DAT file. Opened for asynchronous, sequential read.</param>
     /// <param name="options">Optional reader options. If null, DatFileOptions.Default is used.</param>
-    /// <param name="cancel">Cancellation token to cooperatively cancel the asynchronous enumeration.</param>
+    /// <param name="cancellationToken">Cancellation token to cooperatively cancel the asynchronous enumeration.</param>
     /// <returns>Async sequence of rows as dictionaries keyed by header names. The header row itself is not yielded.</returns>
     public static async IAsyncEnumerable<Dictionary<string, string>> ReadAsync(
         string path,
         DatFileOptions options = null,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancel = default)
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
 
@@ -96,7 +96,7 @@ public static class DatFile
 
         await using var fs = File.Open(path, opts.File);
 
-        await foreach (var row in ReadAsync(fs, opts, cancel).ConfigureAwait(false))
+        await foreach (var row in ReadAsync(fs, opts, cancellationToken).ConfigureAwait(false))
             yield return row;
     }
 
@@ -285,17 +285,17 @@ public static class DatFile
     /// in file order. Uses a small fixed buffer since only the first record is needed.
     /// </summary>
     /// <param name="path">File system path to a Concordance DAT file.</param>
-    /// <param name="cancel">Cancellation token to cooperatively cancel the operation.</param>
+    /// <param name="cancellationToken">Cancellation token to cooperatively cancel the operation.</param>
     /// <returns>A read-only list of header field names in file order.</returns>
     public static async Task<IReadOnlyList<string>> GetHeaderAsync(
         string path,
-        CancellationToken cancel = default)
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
 
         // Open with sensible defaults; header is tiny so defaults are fine here.
         await using var fs = File.Open(path, DatFileOptions.Default.File);
-        return await GetHeaderAsync(fs, cancel).ConfigureAwait(false);
+        return await GetHeaderAsync(fs, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

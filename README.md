@@ -55,7 +55,7 @@ await foreach (var row in DatFile.ReadAsync("c:\\data\\export.dat"))
 ```csharp
 using Concordance.Dat;
 
-var opts = DatFileOptions.Default with
+var options = DatFileOptions.Default with
 {
     ReaderBufferChars = 256 * 1024,   // StreamReader decode buffer (chars)
     ParseChunkChars   = 128 * 1024,   // Parser working buffer (chars)
@@ -69,9 +69,9 @@ var opts = DatFileOptions.Default with
     }
 };
 
-var cancel = CancellationToken.None;
+var cancellationToken = CancellationToken.None;
 
-await foreach (var row in DatFile.ReadAsync("c:\\data\\export.dat", opts, cancel))
+await foreach (var row in DatFile.ReadAsync("c:\\data\\export.dat", options, cancellationToken))
 {
     // ...
 }
@@ -89,11 +89,30 @@ await using var fs = File.Open("c:\\data\\export.dat", new FileStreamOptions
     BufferSize = 1 << 20
 });
 
-await foreach (var row in DatFile.ReadAsync(fs, DatFileOptions.Default))
+await foreach (var row in DatFile.ReadAsync(fs, options))
 {
     // ...
 }
 ```
+
+---
+
+## Reading only the header
+
+To read just the header (field names) from a Concordance DAT file without streaming all records:
+
+```csharp
+using Concordance.Dat;
+
+// From a file path:
+var header = await DatFile.GetHeaderAsync("c:\\data\\export.dat");
+
+// From a stream:
+await using var fs = File.OpenRead("c:\\data\\export.dat");
+var header = await DatFile.GetHeaderAsync(fs);
+```
+
+Returns a read-only list of field names in file order. Throws `FormatException` if the file is empty or invalid.
 
 ---
 
@@ -105,14 +124,24 @@ public static class DatFile
     // Path-based
     public static IAsyncEnumerable<Dictionary<string, string>> ReadAsync(
         string path,
-        DatFileOptions? options = null,
-        CancellationToken cancel = default);
+        DatFileOptions options = null,
+        CancellationToken cancellationToken = default);
 
     // Stream-based
     public static IAsyncEnumerable<Dictionary<string, string>> ReadAsync(
         Stream stream,
-        DatFileOptions? options = null,
-        CancellationToken cancel = default);
+        DatFileOptions options = null,
+        CancellationToken cancellationToken = default);
+
+    // Header-only (path)
+    public static Task<IReadOnlyList<string>> GetHeaderAsync(
+        string path,
+        CancellationToken cancellationToken = default);
+
+    // Header-only (stream)
+    public static Task<IReadOnlyList<string>> GetHeaderAsync(
+        Stream stream,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record DatFileOptions
@@ -130,8 +159,7 @@ public sealed record DatFileOptions
 
 * Throws `FormatException` if a record’s field count does not match the header.
 * Throws `FormatException` if the file does not begin (after optional BOM) with the required `U+00FE` quote character.
-* Honors `CancellationToken` during async enumeration.
+* Honors `CancellationToken` during async enumeration and header reading.
 
 ---
-Created from [JandaBox](https://github.com/Jandini/JandaBox)
-Box icon created by [Freepik - Flaticon](https://www.flaticon.com/free-icons/box)
+Created from [JandaBox](https://github.com/Jandini/JandaBox) | Icon created by [Freepik - Flaticon](https://www.flaticon.com/free-icons/box)
