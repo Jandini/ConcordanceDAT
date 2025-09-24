@@ -1,5 +1,8 @@
 # Concordance.DAT
 
+[![Build](https://github.com/Jandini/Concordance.Dat/actions/workflows/build.yml/badge.svg)](https://github.com/Jandini/Concordance.Dat/actions/workflows/build.yml)
+[![NuGet](https://github.com/Jandini/Concordance.Dat/actions/workflows/nuget.yml/badge.svg)](https://github.com/Jandini/Concordance.Dat/actions/workflows/nuget.yml)
+
 Asynchronous, streaming reader for **Concordance DAT** files targeting **.NET 8**.
 This library centralizes configuration via `DatFileOptions` (with sensible defaults) and follows .NET naming conventions: **namespace** `Concordance.Dat`, **type** `DatFile`.
 
@@ -129,3 +132,6 @@ public sealed record DatFileOptions
 * Throws `FormatException` if the file does not begin (after optional BOM) with the required `U+00FE` quote character.
 * Honors `CancellationToken` during async enumeration.
 
+---
+Created from [JandaBox](https://github.com/Jandini/JandaBox)
+Box icon created by [Freepik - Flaticon](https://www.flaticon.com/free-icons/box)
