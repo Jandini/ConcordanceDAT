@@ -1,62 +1,92 @@
-# ConcordanceDAT
+# Concordance.Dat
 
-A tiny, async, streaming reader for **Concordance DAT** files written for .NET 8.
-It’s designed to be simple, memory-efficient, and robust with very large, multi-line fields.
+Asynchronous, streaming reader for **Concordance DAT** files targeting **.NET 8**.
+This library centralizes configuration via `DatFileOptions` (with sensible defaults) and follows .NET naming conventions: **namespace** `Concordance.Dat`, **type** `DatFile`.
 
----
-
-## Features
-
-* **Async streaming**: `IAsyncEnumerable<Dictionary<string,string>>` — process rows as they’re decoded.
-* **Encoding detection**: UTF-8 (with/without BOM), UTF-16 LE/BE via BOM; falls back to UTF-8 (no BOM).
-* **Format support**:
-
-  * Field **separator**: `0x14`
-  * Field **quote / qualifier**: `0xFE`
-  * **Escaped qualifier**: inside a field, literal `0xFE` is written as doubled `0xFE 0xFE`
-  * **Multi-line fields**: CR/LF/CRLF inside quotes are treated as data (not record terminators)
-* **Header handling**: the **first record is the header** and is **not yielded**; it defines dictionary keys.
-* **Validation**: each data row must have the **same number of fields** as the header (throws `FormatException` if not).
-* **Final record**: if the file ends **without a trailing newline**, the final (unterminated) record is still accepted and yielded.
-* **Memory efficiency**: uses `ArrayPool<char>` for decode buffers and reuses builders/collections.
-* **Order guaranteed**: rows are yielded in file order; no parallelism in the iterator.
-* **Cancellation**: honors `CancellationToken` during read/parse.
+**Author:** GPT5
 
 ---
 
-## Requirements
+## Key behaviors
 
-* **.NET 8** (C# 12/13)
-* Any readable `Stream` (`FileStream`, network streams, etc.)
+* **Separator:** `0x14` (DC4) between fields
+* **Quote / Qualifier:** `0xFE` around every field
+* **Escaped quote:** doubled `0xFE` within a quoted field
+* **Multiline values:** `CR`, `LF`, or `CRLF` inside quotes are treated as data
+* **Record terminators:** `LF` or `CRLF` when not in quotes; a trailing `CR` at EOF is accepted
+* **Header handling:** the first record is the header and is **not** yielded; subsequent rows are dictionaries keyed by header names
+* **Validation:** each data record must have the same number of fields as the header; otherwise a `FormatException` is thrown
+* **Encoding:** BOM-aware detection for **UTF-8**, **UTF-16 LE**, **UTF-16 BE**; BOM-less files must begin with `U+00FE`
+* **Stream positioning:** after detection, if a BOM exists, the stream is positioned to the first character after the BOM
 
 ---
 
-## Quick Start
+## Performance notes
+
+* Uses `ArrayPool<char>` for chunked decoding and reuses `StringBuilder`/`List` instances across records to minimize allocations.
+* Prefer opening files with `FileOptions.Asynchronous | FileOptions.SequentialScan` for best throughput.
+* Buffer sizes are specified in **characters**, not bytes (UTF-16 typically uses 2 bytes per char).
+
+---
+
+## Quick start
+
+Install your project reference (source or package), then:
 
 ```csharp
-using ConcordanceDAT;
+using Concordance.Dat;
 
-await using var fs = File.OpenRead("data/export.dat");
-
-await foreach (var row in DATFile.ReadAsync(fs))
+await foreach (var row in DatFile.ReadAsync("c:\\data\\export.dat"))
 {
-    // Access by column name from the header
     var docId = row["DOCID"];
-    var title = row.TryGetValue("TITLE", out var t) ? t : "";
-    Console.WriteLine($"{docId}: {title}");
+    // process...
 }
 ```
 
-### With cancellation and custom buffer sizes
+---
+
+## Configuration with `DatFileOptions`
+
+`DatFileOptions` centralizes buffer sizes and file-open behavior. Defaults are tuned for good throughput; override as needed.
 
 ```csharp
-var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+using Concordance.Dat;
 
-await foreach (var row in DATFile.ReadAsync(
-                   stream: fs,
-                   readerBufferChars: 128 * 1024,  // StreamReader's internal buffer (chars)
-                   parseChunkChars:  128 * 1024,  // pooled parse buffer (chars)
-                   cancel: cts.Token))
+var opts = DatFileOptions.Default with
+{
+    ReaderBufferChars = 256 * 1024,   // StreamReader decode buffer (chars)
+    ParseChunkChars   = 128 * 1024,   // Parser working buffer (chars)
+    File = new FileStreamOptions
+    {
+        Mode = FileMode.Open,
+        Access = FileAccess.Read,
+        Share = FileShare.Read,
+        Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+        BufferSize = 1 << 20          // 1 MiB
+    }
+};
+
+var cancel = CancellationToken.None;
+
+await foreach (var row in DatFile.ReadAsync("c:\\data\\export.dat", opts, cancel))
+{
+    // ...
+}
+```
+
+You can also supply a `Stream` directly:
+
+```csharp
+await using var fs = File.Open("c:\\data\\export.dat", new FileStreamOptions
+{
+    Mode = FileMode.Open,
+    Access = FileAccess.Read,
+    Share = FileShare.Read,
+    Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+    BufferSize = 1 << 20
+});
+
+await foreach (var row in DatFile.ReadAsync(fs, DatFileOptions.Default))
 {
     // ...
 }
@@ -64,94 +94,38 @@ await foreach (var row in DATFile.ReadAsync(
 
 ---
 
-## API
+## API surface
 
 ```csharp
-public static class DATFile
+public static class DatFile
 {
+    // Path-based
+    public static IAsyncEnumerable<Dictionary<string, string>> ReadAsync(
+        string path,
+        DatFileOptions? options = null,
+        CancellationToken cancel = default);
+
+    // Stream-based
     public static IAsyncEnumerable<Dictionary<string, string>> ReadAsync(
         Stream stream,
-        int readerBufferChars = 128 * 1024,
-        int parseChunkChars   = 128 * 1024,
+        DatFileOptions? options = null,
         CancellationToken cancel = default);
 }
-```
 
-* **stream**: any readable `Stream`.
-* **readerBufferChars**: `StreamReader`’s internal buffer size in **chars** (clamped to 4 KB–1 MB).
-* **parseChunkChars**: pooled `char[]` chunk used by the parser (clamped to 4 KB–1 MB).
-* **cancel**: cooperative cancellation for long reads / very large fields.
-
----
-
-## Concordance DAT Rules (as implemented)
-
-* **Separator**: `0x14`
-* **Qualifier**: `0xFE`
-* **Escaping**: inside a quoted field, a literal qualifier is written as doubled (`0xFE 0xFE`)
-* **Multiline**: CR (`\r`), LF (`\n`), or CRLF are allowed inside quoted fields
-* **Record termination**: LF, CRLF, or a lone CR (when not in quotes)
-* **Header**: first record defines column names (unique names recommended)
-
----
-
-## Error Handling
-
-* **Mismatched column count**
-  Throws `FormatException` with details when a data row’s field count differs from the header count.
-
-* **Encoding issues**
-  BOM is honored (UTF-8/UTF-16 LE/BE). No BOM -> assume UTF-8.
-
-> Tip: If you ingest third-party DATs with inconsistent structure, catch `FormatException` and log the row index/context.
-
----
-
-## Performance Tips
-
-* When opening files yourself, use:
-
-  ```csharp
-  var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-                          bufferSize: 1 << 20,
-                          options: FileOptions.Asynchronous | FileOptions.SequentialScan);
-  ```
-* Tune `readerBufferChars` / `parseChunkChars`:
-
-  * Local disk / LAN SMB: **64–256 KB** often ideal
-  * Higher-latency streams: **256 KB–1 MB** may improve throughput
-* Downstream processing: keep it streaming; avoid buffering all rows in memory.
-
----
-
-## FAQ
-
-**Does async preserve row order?**
-Yes. The iterator is single-threaded; `await foreach` yields rows in the exact order parsed.
-
-**Can fields contain newlines?**
-Yes. Newlines inside quotes are treated as data. Records terminate only when **not** inside quotes.
-
-**What if the final record has no newline?**
-It is accepted and yielded (column-count validation still applies).
-
-**What happens with duplicate header names?**
-Later duplicates overwrite earlier ones in the resulting `Dictionary`. Prefer unique column names.
-
----
-
-## Example: Safe access helpers
-
-```csharp
-await foreach (var row in DATFile.ReadAsync(fs))
+public sealed record DatFileOptions
 {
-    if (row.TryGetValue("DOCID", out var id))
-    {
-        // ...
-    }
+    public int ReaderBufferChars { get; init; } = 128 * 1024;
+    public int ParseChunkChars   { get; init; } = 128 * 1024;
+    public FileStreamOptions File { get; init; } = /* defaults to async + sequential scan, 1 MiB */;
+    public static DatFileOptions Default { get; }
 }
 ```
 
 ---
 
-Created from [JandaBox](https://github.com/Jandini/JandaBox)
+## Error handling
+
+* Throws `FormatException` if a record’s field count does not match the header.
+* Throws `FormatException` if the file does not begin (after optional BOM) with the required `U+00FE` quote character.
+* Honors `CancellationToken` during async enumeration.
+

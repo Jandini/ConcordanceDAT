@@ -13,7 +13,7 @@ try
             .Enrich.WithMachineName()
             .WriteTo.Console(
                 theme: AnsiConsoleTheme.Code,
-                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u4}] [{MachineName}] [{SourceContext}] {Message}{NewLine}{Exception}")
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u4}] {Message}{NewLine}{Exception}")
             .CreateLogger()))
         .AddTransient<Main>()
         .BuildServiceProvider();

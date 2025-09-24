@@ -1,159 +1,203 @@
 ﻿using System.Buffers;
 using System.Text;
 
-namespace ConcordanceDAT;
+namespace Concordance.Dat;
+
+/// <summary>
+/// Configuration for the Concordance DAT reader. Provides tuning knobs for decoding and parsing,
+/// plus default file-open options used by the path-based overload.
+/// </summary>
+public sealed record DatFileOptions
+{
+    /// <summary>
+    /// Size in characters of the internal StreamReader buffer. Clamped between 4 KB and 1 MB. Default is 128 KB.
+    /// </summary>
+    public int ReaderBufferChars { get; init; } = 128 * 1024;
+
+    /// <summary>
+    /// Size in characters of the pooled parsing buffer used per read cycle. Clamped between 4 KB and 1 MB. Default is 128 KB.
+    /// </summary>
+    public int ParseChunkChars { get; init; } = 128 * 1024;
+
+    /// <summary>
+    /// File stream options applied by the ReadAsync(string path, ...) overload. If not provided,
+    /// defaults to asynchronous, sequential read with a 1 MiB OS buffer.
+    /// </summary>
+    public FileStreamOptions File { get; init; } = new FileStreamOptions
+    {
+        Mode = FileMode.Open,
+        Access = FileAccess.Read,
+        Share = FileShare.Read,
+        Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+        BufferSize = 1 << 20 // 1 MiB
+    };
+
+    /// <summary>
+    /// A reusable default instance with conservative, high-throughput settings.
+    /// </summary>
+    public static DatFileOptions Default { get; } = new DatFileOptions();
+
+    internal DatFileOptions Clamp()
+        => this with
+        {
+            ReaderBufferChars = Math.Clamp(ReaderBufferChars, 4 * 1024, 1 * 1024 * 1024),
+            ParseChunkChars = Math.Clamp(ParseChunkChars, 4 * 1024, 1 * 1024 * 1024),
+        };
+}
 
 /// <summary>
 /// Asynchronous, streaming reader for Concordance DAT files.
+/// This reader is designed for very large files and minimizes allocations by reusing buffers.
+/// It supports UTF-8 and UTF-16 encodings, honors the Concordance format rules, and yields
+/// one dictionary per data record where keys come from the header row.
 /// </summary>
-public static class DATFile
+public static class DatFile
 {
     /// <summary>
-    /// Entry point. Wraps the stream with a BOM-aware encoding, then streams rows via an inner async iterator.
-    /// readerBufferChars controls the internal <see cref="StreamReader"/> buffer (in chars),
-    /// parseChunkChars controls the size of the pooled char[] used for per-iteration decoding/parsing.
+    /// Opens a file path and streams it as a Concordance DAT reader, returning an async sequence of rows.
+    /// The first record in the file is treated as the header and is not yielded to the caller.
+    /// After the header is parsed, each subsequent record is returned as a dictionary using the header names as keys.
     /// </summary>
+    /// <param name="path">File system path to a Concordance DAT file. Opened for asynchronous, sequential read.</param>
+    /// <param name="options">Optional reader options. If null, DatFileOptions.Default is used.</param>
+    /// <param name="cancel">Cancellation token to cooperatively cancel the asynchronous enumeration.</param>
+    /// <returns>Async sequence of rows as dictionaries keyed by header names. The header row itself is not yielded.</returns>
     public static async IAsyncEnumerable<Dictionary<string, string>> ReadAsync(
-        Stream stream,
-        int readerBufferChars = 128 * 1024,
-        int parseChunkChars = 128 * 1024,
+        string path,
+        DatFileOptions options = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancel = default)
     {
-        // Validate input stream early; enumeration is lazy but we fail fast on obvious misuses.
-        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentException.ThrowIfNullOrEmpty(path);
 
-        if (!stream.CanRead)
-            throw new ArgumentException("Stream must be readable.", nameof(stream));
+        var opts = (options ?? DatFileOptions.Default).Clamp();
 
-        // Clamp buffer sizes to reasonable bounds (avoid tiny or very large allocations).
-        // Note these are in *characters* (not bytes). UTF-16 will consume ~2x bytes per char.
-        readerBufferChars = Math.Clamp(readerBufferChars, 4 * 1024, 1 * 1024 * 1024);
-        parseChunkChars = Math.Clamp(parseChunkChars, 4 * 1024, 1 * 1024 * 1024);
+        await using var fs = File.Open(path, opts.File);
 
-        // BOM detection (UTF-8/UTF-16 LE/BE). If no BOM, default to UTF-8 without BOM.
-        var encoding = DetectEncoding(stream);
-
-        // StreamReader is used solely for text decoding; we drive it with ReadAsync into a pooled char buffer below.
-        // detectEncodingFromByteOrderMarks:false because we already handled BOM; leaveOpen:false so the stream is disposed here.
-        using var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: false, bufferSize: readerBufferChars, leaveOpen: false);
-
-        // Defer actual parsing to the async iterator that yields one Dictionary per record (excluding header).
-        await foreach (var row in GetRowsAsync(reader, parseChunkChars, cancel).ConfigureAwait(false))
+        await foreach (var row in ReadAsync(fs, opts, cancel).ConfigureAwait(false))
             yield return row;
     }
 
     /// <summary>
-    /// Core async iterator that:
-    /// - Decodes into a pooled char[] in chunks
-    /// - Parses fields honoring quotes and separators
-    /// - Builds and yields a dictionary per record
-    /// 
-    /// Implementation detail:
-    /// We avoid keeping Span&lt;char&gt; locals across await/yield boundaries (a C# 13 restriction for byref-like types).
-    /// Instead we index directly into the pooled char[] buffer.
+    /// Opens a text stream as a Concordance DAT reader and returns an async sequence of rows.
+    /// The first record in the file is treated as the header and is not yielded to the caller.
+    /// After the header is parsed, each subsequent record is returned as a dictionary using
+    /// the header names as keys. Records are streamed in file order.
+    ///
+    /// The method detects the encoding using DetectEncoding. The stream position is adjusted
+    /// so that if a BOM exists it will be set to the first character after the BOM. If no BOM
+    /// exists it remains at the original position.
+    /// </summary>
+    /// <param name="stream">Readable, seekable stream positioned at the beginning of a Concordance DAT file.</param>
+    /// <param name="options">Optional reader options. If null, DatFileOptions.Default is used.</param>
+    /// <param name="cancel">Cancellation token to cooperatively cancel the asynchronous enumeration.</param>
+    /// <returns>Async sequence of rows as dictionaries keyed by header names. The header row itself is not yielded.</returns>
+    public static async IAsyncEnumerable<Dictionary<string, string>> ReadAsync(
+        Stream stream,
+        DatFileOptions options = null,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        if (!stream.CanRead) throw new ArgumentException("Stream must be readable.", nameof(stream));
+
+        var opts = (options ?? DatFileOptions.Default).Clamp();
+
+        // Detect encoding and position the stream correctly with respect to a possible BOM.
+        var encoding = DetectEncoding(stream);
+
+        // Create a StreamReader only for decoding. Disable BOM auto detection since DetectEncoding already handled it.
+        using var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: false, bufferSize: opts.ReaderBufferChars, leaveOpen: false);
+
+        // Delegate parsing to the inner async iterator that yields rows.
+        await foreach (var row in GetRowsAsync(reader, opts.ParseChunkChars, cancellationToken).ConfigureAwait(false))
+            yield return row;
+    }
+
+    /// <summary>
+    /// Parses the text provided by the StreamReader and yields records as dictionaries.
+    /// The first record parsed is treated as the header and is not yielded.
+    ///
+    /// Parsing rules based on Concordance DAT format:
+    /// Field separator is 0x14.
+    /// Field quote character is 0xFE.
+    /// All fields are quoted. A literal quote inside a field is written as 0xFE 0xFE.
+    /// Newlines inside quoted fields are part of the value and do not end the record.
+    /// A record ends on LF or CRLF when not inside quotes. A final CR at end of file is also accepted.
+    ///
+    /// This method uses a pooled char buffer and reuses StringBuilder and List instances across records
+    /// to reduce allocations. It also supports cancellation checks on each chunk.
     /// </summary>
     private static async IAsyncEnumerable<Dictionary<string, string>> GetRowsAsync(
-       StreamReader reader,
+        StreamReader reader,
         int parseChunkChars,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancel)
     {
-        // Rent a pooled char[] for decode/parsing. Large enough to amortize syscalls, small enough to keep memory steady.
         var pool = ArrayPool<char>.Shared;
         var buffer = pool.Rent(parseChunkChars);
         try
         {
-            // DAT dialect: 0x14 is the field separator, 0xFE is the field quote/qualifier.
-            var sep = (char)0x14; // column separator
-            var quote = (char)0xFE; // field quote
+            var sep = (char)0x14;   // Column separator
+            var quote = (char)0xFE; // Field quote
 
-            // Parsing state flags:
-            // - inQuotes : inside a quoted field (record terminators and separators are ignored until we close quotes).
-            // - lastWasCR: encountered '\r' and are waiting to see if it is followed by '\n' to form CRLF across chunk boundaries.
-            var inQuotes = false;
-            var lastWasCR = false;
+            var inQuotes = false;   // True when inside a quoted field
+            var lastWasCR = false;  // True if last char was CR and we need to check for CRLF across chunks
 
-            // Reused builders/containers to minimize per-record allocations.
-            // StringBuilder accumulates the current field's text (including any embedded newlines if inQuotes).
-            // 'fields' collects the completed fields for the current record.
-            var field = new StringBuilder(8192);
-            var fields = new List<string>(128);
-            List<string> headers = null; // Will be set from the first record; that record is *not* yielded.
+            var field = new StringBuilder(8192);  // Accumulates the current field text
+            var fields = new List<string>(128);   // Collects fields for the current record
+            List<string> headers = null;          // Captured from the first record
 
-            // Finalize the current field: take the accumulated chars as the field value and reset the builder.
             void EndField()
             {
                 fields.Add(field.ToString());
                 field.Clear();
             }
 
-            // Finalize the current record:
-            // - If this is the first record, treat it as the header (capture column names) and do not yield a row.
-            // - Otherwise, validate field count, build a dictionary keyed by header names, and return it for yield.
             Dictionary<string, string> EndRecord()
             {
                 if (headers is null)
                 {
-                    // Header row: copy current fields as header names; clear 'fields' to prepare for first data row.
                     headers = [.. fields];
                     fields.Clear();
-                    return []; // skip header row
+                    return []; // Do not yield header
                 }
 
-                // strict column-count validation
-                // Enforces: same number of fields as headers; also acts as a guard to detect missing separators/terminators.
                 if (fields.Count != headers.Count)
-                    throw new FormatException($"Invalid field count: got {fields.Count}, expected {headers.Count}. " +
-                                              "Each record must have the same number of columns as the header and end with a line break.");
+                    throw new FormatException($"Invalid field count: got {fields.Count}, expected {headers.Count}. Each record must match the header column count and end with a line break.");
 
-                // Build the row dictionary.
-                // Note: if headers had duplicates, later keys overwrite earlier ones (Dictionary indexer semantics).
                 var dict = new Dictionary<string, string>(headers.Count, StringComparer.OrdinalIgnoreCase);
-                var count = Math.Max(headers.Count, fields.Count);
-                for (int i = 0; i < count; i++)
-                {
-                    var key = i < headers.Count ? headers[i] : $"Column{i + 1}";
-                    var val = i < fields.Count ? fields[i] : string.Empty;
-                    dict[key] = val;
-                }
+                for (int i = 0; i < headers.Count; i++)
+                    dict[headers[i]] = fields[i];
+
                 fields.Clear();
                 return dict;
             }
 
-            // Read/decode text into buffer and parse it chunk-by-chunk.
             int read;
             while ((read = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
             {
                 for (int i = 0; i < read; i++)
                 {
-                    // Allow consumers to cancel mid-record (important for very large fields).
                     cancel.ThrowIfCancellationRequested();
 
                     char ch = buffer[i];
 
-                    // If previous char was CR and we are NOT in quotes, check for CRLF (spanning across chunk boundaries).
                     if (lastWasCR)
                     {
                         lastWasCR = false;
                         if (ch == '\n' && !inQuotes)
                         {
-                            // CRLF terminates a record when not inside quotes.
                             EndField();
                             var row = EndRecord();
-                            if (row.Count > 0) yield return row; // skip header (EndRecord returns empty)
-                            continue; // consume LF and move on
+                            if (row.Count > 0) yield return row;
+                            continue; // consume LF of CRLF
                         }
                         else
                         {
-                            // The CR was literal content (because either we're inside quotes or the next char wasn't LF).
-                            field.Append('\r');
-                            // fall through to handle current character normally
+                            field.Append('\r'); // CR was data
                         }
                     }
 
                     if (ch == quote)
                     {
-                        // If we are inside quotes and the next char is also a quote, this is an escaped quote ("" → ").
-                        // We materialize a single literal 0xFE into the field and skip the second char.
                         if (inQuotes && i + 1 < read && buffer[i + 1] == quote)
                         {
                             field.Append(quote); // escaped quote
@@ -161,19 +205,15 @@ public static class DATFile
                         }
                         else
                         {
-                            // Toggle quote state: start or end of a quoted field.
-                            // Outer quotes are not written into the field.
-                            inQuotes = !inQuotes; // toggle
+                            inQuotes = !inQuotes; // toggle quote state
                         }
                     }
                     else if (!inQuotes && ch == sep)
                     {
-                        // Separator only counts when NOT inside quotes.
                         EndField();
                     }
                     else if (!inQuotes && ch == '\n')
                     {
-                        // LF (without a preceding CR in this same chunk) also terminates a record when not in quotes.
                         EndField();
                         var row = EndRecord();
                         if (row.Count > 0) yield return row;
@@ -181,24 +221,18 @@ public static class DATFile
                     else if (ch == '\r')
                     {
                         if (!inQuotes)
-                            // Might be CRLF. We delay decision to the next character (possibly in the next chunk).
-                            lastWasCR = true;
+                            lastWasCR = true; // might be CRLF
                         else
-                            // CR inside a quoted field is literal content.
-                            field.Append('\r');
+                            field.Append('\r'); // literal CR inside quotes
                     }
                     else
                     {
-                        // Regular data character (including newlines if inQuotes).
                         field.Append(ch);
                     }
                 }
             }
 
-            // End-of-stream handling:
-
-            // If the very last char we saw was a CR (not in quotes) and we've reached EOF,
-            // treat it as a record terminator (a lone CR, or CR ending the file without LF).
+            // Handle trailing CR as a record terminator.
             if (lastWasCR && !inQuotes)
             {
                 EndField();
@@ -206,9 +240,7 @@ public static class DATFile
                 if (rowCR.Count > 0) yield return rowCR;
             }
 
-            // If we still have buffered field/record content at EOF, flush it as the final (unterminated) record.
-            // This accepts files that omit a trailing newline, which is common with some exporters.
-            // Column-count validation still applies inside EndRecord().
+            // Flush any remaining data as the final record (handles missing trailing newline).
             if (field.Length > 0 || fields.Count > 0)
             {
                 EndField();
@@ -218,41 +250,96 @@ public static class DATFile
         }
         finally
         {
-            // Always return the pooled buffer to avoid leaks/fragmentation.
             pool.Return(buffer);
         }
     }
 
     /// <summary>
-    /// Minimal BOM-based encoding detection:
-    /// - UTF-8 with BOM → UTF8 (without emitting BOM on writes)
-    /// - UTF-16 LE/BE   → Unicode/BigEndianUnicode
-    /// - Otherwise      → UTF8 (no BOM)
-    /// 
-    /// We preserve the original stream position when seekable.
+    /// Detects text encoding for a Concordance DAT stream and positions the stream correctly relative to any BOM.
+    ///
+    /// If a BOM is present, recognizes UTF-16 LE, UTF-16 BE, or UTF-8 BOM and validates that the first character
+    /// after the BOM is the Concordance quote U+00FE. If valid, returns the corresponding encoding and sets the
+    /// stream position to the first character after the BOM.
+    ///
+    /// If no BOM is present, validates the first two bytes as one of:
+    /// UTF-16 LE without BOM where the first character is FE 00,
+    /// UTF-16 BE without BOM where the first character is 00 FE,
+    /// UTF-8 without BOM where the first character is C3 BE.
+    /// In these BOM-less cases, returns the corresponding encoding and leaves the stream at the original position.
+    ///
+    /// If none of the patterns match, throws a FormatException because a valid Concordance DAT must begin
+    /// with the quote character after the optional BOM.
     /// </summary>
+    /// <param name="stream">Seekable stream positioned at the start of a Concordance DAT file.</param>
+    /// <returns>The detected text encoding with strict decoding settings.</returns>
     private static Encoding DetectEncoding(Stream stream)
     {
-        long pos = stream.CanSeek ? stream.Position : 0;
+        ArgumentNullException.ThrowIfNull(stream);
+        if (!stream.CanSeek) throw new InvalidOperationException("Stream must be seekable for encoding detection.");
 
-        // Use BinaryReader to peek a few bytes for BOM detection; leave the stream open.
-        using var br = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+        long start = stream.Position;
 
-        // 3 bytes are enough to detect UTF-8 BOM; 2 bytes detect UTF-16 BOMs.
-        Span<byte> bom = stackalloc byte[3];
-        int got = br.Read(bom);
+        // Read enough bytes to identify a BOM and confirm the first character (þ).
+        byte[] buf = new byte[6];
+        int bytes = stream.Read(buf, 0, buf.Length);
 
-        // Rewind to original position so the caller/StreamReader can re-read from the correct start.
-        if (stream.CanSeek) stream.Position = pos;
+        static Encoding Utf8Strict() => new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+        static Encoding Utf16LE() => new UnicodeEncoding(bigEndian: false, byteOrderMark: false, throwOnInvalidBytes: true);
+        static Encoding Utf16BE() => new UnicodeEncoding(bigEndian: true, byteOrderMark: false, throwOnInvalidBytes: true);
 
-        // UTF-8 BOM
-        if (got >= 3 && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF) return new UTF8Encoding(false);
-        // UTF-16 LE BOM
-        if (got >= 2 && bom[0] == 0xFF && bom[1] == 0xFE) return Encoding.Unicode;          // UTF-16 LE
-        // UTF-16 BE BOM
-        if (got >= 2 && bom[0] == 0xFE && bom[1] == 0xFF) return Encoding.BigEndianUnicode; // UTF-16 BE
+        // UTF-16 LE with BOM: FF FE, expect FE 00 as first char (U+00FE)
+        if (bytes >= 2 && buf[0] == 0xFF && buf[1] == 0xFE)
+        {
+            if (bytes >= 4 && !(buf[2] == 0xFE && buf[3] == 0x00))
+                throw new FormatException("Invalid Concordance DAT: expected U+00FE after UTF-16 LE BOM.");
 
-        // Default: UTF-8 without BOM (common for Concordance exports).
-        return new UTF8Encoding(false);
+            stream.Position = start + 2; // after BOM
+            return Utf16LE();
+        }
+
+        // UTF-16 BE with BOM: FE FF, expect 00 FE as first char (U+00FE)
+        if (bytes >= 2 && buf[0] == 0xFE && buf[1] == 0xFF)
+        {
+            if (bytes >= 4 && !(buf[2] == 0x00 && buf[3] == 0xFE))
+                throw new FormatException("Invalid Concordance DAT: expected U+00FE after UTF-16 BE BOM.");
+
+            stream.Position = start + 2; // after BOM
+            return Utf16BE();
+        }
+
+        // UTF-8 with BOM: EF BB BF, expect C3 BE as first char (U+00FE)
+        if (bytes >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF)
+        {
+            if (bytes >= 5 && !(buf[3] == 0xC3 && buf[4] == 0xBE))
+                throw new FormatException("Invalid Concordance DAT: expected U+00FE after UTF-8 BOM.");
+
+            stream.Position = start + 3; // after BOM
+            return Utf8Strict();
+        }
+
+        // No BOM: the first character must be U+00FE in one of the supported encodings.
+
+        // UTF-16 LE without BOM: FE 00
+        if (bytes >= 2 && buf[0] == 0xFE && buf[1] == 0x00)
+        {
+            stream.Position = start;
+            return Utf16LE();
+        }
+
+        // UTF-16 BE without BOM: 00 FE
+        if (bytes >= 2 && buf[0] == 0x00 && buf[1] == 0xFE)
+        {
+            stream.Position = start;
+            return Utf16BE();
+        }
+
+        // UTF-8 without BOM: C3 BE
+        if (bytes >= 2 && buf[0] == 0xC3 && buf[1] == 0xBE)
+        {
+            stream.Position = start;
+            return Utf8Strict();
+        }
+
+        throw new FormatException("Invalid Concordance DAT: file must start with the quote character U+00FE after an optional BOM.");
     }
 }
