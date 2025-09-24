@@ -1,0 +1,39 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>	
+	</PropertyGroup>
+
+	<PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+		<DebugType>none</DebugType>
+		<DebugSymbols>false</DebugSymbols>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<Authors>Matt Janda</Authors>
+		<PackageIcon>icon.png</PackageIcon>
+		<PackageLicenseFile>LICENSE</PackageLicenseFile>
+		<PackageReadmeFile>README.md</PackageReadmeFile>		
+		<PackageId>Concordance.Dat</PackageId>
+		<AssemblyName>Concordance.Dat</AssemblyName>
+		<RootNamespace>Concordance.Dat</RootNamespace>
+		<Description>Concordance.Dat</Description>
+		<PackageTags>Concordance.Dat</PackageTags>
+		<RepositoryUrl>https://github.com/Jandini/Concordance.Dat</RepositoryUrl>
+		<PackageProjectUrl>https://github.com/Jandini/Concordance.Dat</PackageProjectUrl>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="..\..\icon.png" Pack="true" PackagePath="" />
+		<None Include="..\..\LICENSE" Pack="true" PackagePath="" />
+		<None Include="..\..\README.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="GitVersion.MsBuild" Version="5.12.0">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+	</ItemGroup>
+</Project>
