@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Sinks.SystemConsole.Themes;
+using Serilog.Sinks.File;
 
 int exitCode = byte.MaxValue;
 
@@ -13,6 +14,8 @@ try
             .Enrich.WithMachineName()
             .WriteTo.Console(
                 theme: AnsiConsoleTheme.Code,
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u4}] {Message}{NewLine}{Exception}")
+            .WriteTo.File($"logs/concordance-{DateTime.Now.ToString("yyyMMdd-HHmmss")}.log",
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u4}] {Message}{NewLine}{Exception}")
             .CreateLogger()))
         .AddTransient<Main>()
