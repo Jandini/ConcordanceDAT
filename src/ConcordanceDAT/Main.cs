@@ -20,25 +20,10 @@ internal class Main(ILogger<Main> logger)
         var totalWatch = Stopwatch.StartNew();
         var errors = new ConcurrentDictionary<string, string>();
 
-        // Reader options: tweak buffers and file open behavior (Asynchronous + SequentialScan)
-        var readerOptions = DatFileOptions.Default with
-        {
-            ReaderBufferChars = 128 * 1024,
-            ParseChunkChars = 128 * 1024,
-            File = new FileStreamOptions
-            {
-                Mode = FileMode.Open,
-                Access = FileAccess.Read,
-                Share = FileShare.Read,
-                Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
-                BufferSize = 1 << 20 // 1 MiB
-            }
-        };
-
         // Tune parallelism for your storage. Start modestly; measure and adjust.
         var parallel = new ParallelOptions
         {
-            MaxDegreeOfParallelism = 4,
+            MaxDegreeOfParallelism = 8,
             CancellationToken = cancellationToken
         };
 
@@ -52,12 +37,12 @@ internal class Main(ILogger<Main> logger)
 
             try
             {
-                await foreach (var _ in DatFile.ReadAsync(datFile, readerOptions, ct))
+                await foreach (var _ in DatFile.ReadAsync(datFile, ct))
                 {
                     rowNumber++;
 
-                    // Throttle UI updates to avoid contention (every ~500ms)
-                    if (lastProgressUpdate.ElapsedMilliseconds >= 500)
+                    // Throttle UI updates to avoid contention (every ~1s)
+                    if (lastProgressUpdate.ElapsedMilliseconds >= 1000)
                     {
                         Console.Title = $"{Path.GetFileName(datFile)} : {rowNumber:N0}";
                         lastProgressUpdate.Restart();

@@ -53,6 +53,30 @@ public sealed record DatFileOptions
 /// </summary>
 public static class DatFile
 {
+
+
+    /// <summary>
+    /// Convenience overload that opens and streams a Concordance DAT file using
+    /// <see cref="DatFileOptions.Default"/>. This returns the underlying async iterator
+    /// without creating an extra state machine (the method itself is not marked <c>async</c>).
+    /// </summary>
+    /// <param name="path">
+    /// Full filesystem path to the Concordance DAT file. The file is opened for asynchronous,
+    /// sequential read with defaults defined in <see cref="DatFileOptions.Default.File"/>.
+    /// </param>
+    /// <param name="cancellationToken">
+    /// Cancellation token to cooperatively cancel the asynchronous enumeration.
+    /// </param>
+    /// <returns>
+    /// An <see cref="IAsyncEnumerable{T}"/> of rows, where each row is a
+    /// <see cref="Dictionary{TKey, TValue}"/> keyed by header column names.
+    /// The header record itself is not yielded.
+    /// </returns>
+    public static IAsyncEnumerable<Dictionary<string, string>> ReadAsync(
+        string path,
+        CancellationToken cancellationToken = default)
+        => ReadAsync(path, DatFileOptions.Default, cancellationToken);
+
     /// <summary>
     /// Opens a file path and streams it as a Concordance DAT reader, returning an async sequence of rows.
     /// The first record in the file is treated as the header and is not yielded to the caller.
@@ -318,27 +342,19 @@ public static class DatFile
         }
 
         // No BOM: the first character must be U+00FE in one of the supported encodings.
+        stream.Position = start;
 
         // UTF-16 LE without BOM: FE 00
         if (bytes >= 2 && buf[0] == 0xFE && buf[1] == 0x00)
-        {
-            stream.Position = start;
             return Utf16LE();
-        }
 
         // UTF-16 BE without BOM: 00 FE
         if (bytes >= 2 && buf[0] == 0x00 && buf[1] == 0xFE)
-        {
-            stream.Position = start;
             return Utf16BE();
-        }
 
         // UTF-8 without BOM: C3 BE
         if (bytes >= 2 && buf[0] == 0xC3 && buf[1] == 0xBE)
-        {
-            stream.Position = start;
             return Utf8Strict();
-        }
 
         throw new FormatException("Invalid Concordance DAT: file must start with the quote character U+00FE after an optional BOM.");
     }
