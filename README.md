@@ -3,8 +3,7 @@
 [![Build](https://github.com/Jandini/Concordance.Dat/actions/workflows/build.yml/badge.svg)](https://github.com/Jandini/Concordance.Dat/actions/workflows/build.yml)
 [![NuGet](https://github.com/Jandini/Concordance.Dat/actions/workflows/nuget.yml/badge.svg)](https://github.com/Jandini/Concordance.Dat/actions/workflows/nuget.yml)
 
-Asynchronous, streaming reader for **Concordance DAT** files targeting **.NET 8**.
-This library centralizes configuration via `DatFileOptions` (with sensible defaults) and follows .NET naming conventions: **namespace** `Concordance.Dat`, **type** `DatFile`.
+**Concordance.DAT** is a high-performance, asynchronous streaming reader for Concordance DAT files, designed for .NET 8. It efficiently parses large legal discovery exports, supports robust encoding detection, and provides flexible handling of empty fields and multiline data. Built for reliability and speed in e-discovery and document management workflows.
 
 **Author:** GPT5
 
