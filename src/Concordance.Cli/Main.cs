@@ -57,19 +57,12 @@ internal class Main(ILogger<Main> logger)
                 var seconds = sw.Elapsed.TotalSeconds;
                 var rowsPerSecond = seconds > 0 ? rowNumber / seconds : 0;
 
-                // Capture memory snapshots (working set = process resident; managed = GC heap)
-                var workingSetMB = Process.GetCurrentProcess().WorkingSet64 / (1024.0 * 1024.0);
-                var managedMB = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
 
-                logger.LogInformation(
-                    "Read {count} rows in {elapsed} ({rps:F2} rows/sec) | Working Set: {ws:N2} MB | Managed: {managed:N2} MB",
-                    rowNumber, sw.Elapsed, rowsPerSecond, workingSetMB, managedMB
-                );
+                logger.LogInformation("Read {count} rows in {elapsed} ({rps:F2} rows/sec)", rowNumber, sw.Elapsed, rowsPerSecond);
 
                 lock (aggLock)
                 {
                     totalRows += rowNumber;
-                    totalMemoryMB += workingSetMB;   // average-of-snapshots; for max, track separately if needed
                     totalSeconds += seconds;
                     fileCount++;
                 }
