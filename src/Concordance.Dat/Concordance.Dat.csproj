@@ -2,7 +2,7 @@
 
 	<PropertyGroup>
 		<TargetFramework>net8.0</TargetFramework>
-		<ImplicitUsings>enable</ImplicitUsings>	
+		<ImplicitUsings>enable</ImplicitUsings>
 	</PropertyGroup>
 
 	<PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
@@ -14,12 +14,13 @@
 		<Authors>Matt Janda</Authors>
 		<PackageIcon>icon.png</PackageIcon>
 		<PackageLicenseFile>LICENSE</PackageLicenseFile>
-		<PackageReadmeFile>README.md</PackageReadmeFile>		
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<PackageId>Concordance.Dat</PackageId>
 		<AssemblyName>Concordance.Dat</AssemblyName>
 		<RootNamespace>Concordance.Dat</RootNamespace>
-		<Description>Concordance.Dat</Description>
-		<PackageTags>Concordance.Dat</PackageTags>
+		<Description>Asynchronous, high-performance streaming reader for Concordance DAT files with header-aware parsing, robust encoding detection, and minimal allocations. Supports .NET 8.
+		</Description>
+		<PackageTags>concordance;dat;streaming;parser;async;legal;ediscovery;dotnet;net8</PackageTags>
 		<RepositoryUrl>https://github.com/Jandini/Concordance.Dat</RepositoryUrl>
 		<PackageProjectUrl>https://github.com/Jandini/Concordance.Dat</PackageProjectUrl>
 	</PropertyGroup>
