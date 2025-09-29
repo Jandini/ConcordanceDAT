@@ -1,7 +1,15 @@
 ﻿using System.Buffers;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Concordance.Dat;
+
+public enum EmptyField
+{    
+    Null,
+    Keep,
+    Omit
+}
 
 /// <summary>
 /// Configuration for the Concordance DAT reader. Provides tuning knobs for decoding and parsing,
@@ -31,6 +39,9 @@ public sealed record DatFileOptions
         Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
         BufferSize = 1 << 20 // 1 MiB
     };
+
+
+    public EmptyField EmptyFieldMode { get; init; } = EmptyField.Null;
 
     /// <summary>
     /// A reusable default instance with conservative, high-throughput settings.
@@ -131,7 +142,7 @@ public static class DatFile
         using var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: false, bufferSize: opts.ReaderBufferChars, leaveOpen: false);
 
         // Delegate parsing to the inner async iterator that yields rows.
-        await foreach (var row in GetRowsAsync(reader, opts.ParseChunkChars, cancellationToken).ConfigureAwait(false))
+        await foreach (var row in GetRowsAsync(reader, opts, cancellationToken).ConfigureAwait(false))
             yield return row;
     }
 
@@ -150,16 +161,17 @@ public static class DatFile
     /// to reduce allocations. It also supports cancellation checks on each chunk.
     /// </summary>
     private static async IAsyncEnumerable<Dictionary<string, string>> GetRowsAsync(
-        StreamReader reader,
-        int parseChunkChars,
+        StreamReader reader, 
+        DatFileOptions options,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var pool = ArrayPool<char>.Shared;
-        var buffer = pool.Rent(parseChunkChars);
+        var buffer = pool.Rent(options.ParseChunkChars);
         try
         {
             var sep = (char)0x14;   // Column separator
             var quote = (char)0xFE; // Field quote
+            var empty = options.EmptyFieldMode;
 
             var inQuotes = false;   // True when inside a quoted field
             var lastWasCR = false;  // True if last char was CR and we need to check for CRLF across chunks
@@ -186,9 +198,26 @@ public static class DatFile
                 if (fields.Count != headers.Count)
                     throw new FormatException($"Invalid field count: got {fields.Count}, expected {headers.Count}. Each record must match the header column count and end with a line break.");
 
-                var dict = new Dictionary<string, string>(headers.Count, StringComparer.OrdinalIgnoreCase);
-                for (int i = 0; i < headers.Count; i++)
-                    dict[headers[i]] = fields[i];
+                var count = headers.Count;
+                var dict = new Dictionary<string, string>(count, StringComparer.OrdinalIgnoreCase);
+
+                var hSpan = CollectionsMarshal.AsSpan(headers); 
+                var fSpan = CollectionsMarshal.AsSpan(fields);
+
+                for (int i = 0; i < count; i++)
+                {
+                    var key = hSpan[i];
+                    var val = fSpan[i];
+
+                    if (!string.IsNullOrEmpty(val))
+                    {
+                        dict[key] = val;
+                    }
+                    else if (empty != EmptyField.Omit)
+                    {
+                        dict[key] = (empty == EmptyField.Null) ? null : string.Empty;
+                    }
+                }
 
                 fields.Clear();
                 return dict;
