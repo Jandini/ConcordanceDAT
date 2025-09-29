@@ -7,13 +7,15 @@ using Serilog.Sinks.SystemConsole.Themes;
 try
 {
     using var serviceProvider = new ServiceCollection()
-        .AddLogging(builder => builder.AddSerilog(new LoggerConfiguration()
-            .Enrich.WithMachineName()
+        .AddLogging(builder => builder.AddSerilog(new LoggerConfiguration()            
+            .Enrich.WithStopwatch(string.Empty)
+            .Enrich.WithIoMetrics()
+            .Enrich.WithMemoryMetrics()
             .WriteTo.Console(
                 theme: AnsiConsoleTheme.Code,
-                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u4}] {Message}{NewLine}{Exception}")
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} ({Stopwatch}) [{Level:u4}] {Message} | Read {IoReadBytes:N0} | Memory {WorkingSetBytes:N0}{NewLine}{Exception}")
             .WriteTo.File($"logs/concordance-{DateTime.Now.ToString("yyyMMdd-HHmmss")}.log",
-                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u4}] {Message}{NewLine}{Exception}")
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u4}] {Message}{NewLine} | Elapsed {Stopwatch} | Read {IoReadBytes:N0} | Memory {WorkingSetBytes:N0}{Exception}")
             .CreateLogger()))
         .AddTransient<Main>()
         .BuildServiceProvider();

@@ -21,6 +21,10 @@ This library centralizes configuration via `DatFileOptions` (with sensible defau
 * **Validation:** each data record must have the same number of fields as the header; otherwise a `FormatException` is thrown
 * **Encoding:** BOM-aware detection for **UTF-8**, **UTF-16 LE**, **UTF-16 BE**; BOM-less files must begin with `U+00FE`
 * **Stream positioning:** after detection, if a BOM exists, the stream is positioned to the first character after the BOM
+* **Empty field handling:** configurable via `EmptyFieldMode` in `DatFileOptions`:
+  * `Null` (default): empty fields are included as `null` values
+  * `Keep`: empty fields are included as empty strings
+  * `Omit`: empty fields are omitted from the output dictionary
 
 ---
 
@@ -50,7 +54,7 @@ await foreach (var row in DatFile.ReadAsync("c:\\data\\export.dat"))
 
 ## Configuration with `DatFileOptions`
 
-`DatFileOptions` centralizes buffer sizes and file-open behavior. Defaults are tuned for good throughput; override as needed.
+`DatFileOptions` centralizes buffer sizes, file-open behavior, and empty field handling. Defaults are tuned for good throughput; override as needed.
 
 ```csharp
 using Concordance.Dat;
@@ -66,7 +70,8 @@ var options = DatFileOptions.Default with
         Share = FileShare.Read,
         Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
         BufferSize = 1 << 20          // 1 MiB
-    }
+    },
+    EmptyFieldMode = EmptyField.Omit // Omit empty fields from output dictionary
 };
 
 var cancellationToken = CancellationToken.None;
@@ -88,6 +93,8 @@ await using var fs = File.Open("c:\\data\\export.dat", new FileStreamOptions
     Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
     BufferSize = 1 << 20
 });
+
+var options = DatFileOptions.Default with { EmptyFieldMode = EmptyField.Keep };
 
 await foreach (var row in DatFile.ReadAsync(fs, options))
 {
@@ -119,6 +126,13 @@ Returns a read-only list of field names in file order. Throws `FormatException` 
 ## API surface
 
 ```csharp
+public enum EmptyField
+{
+    Null, // empty fields as null (default)
+    Keep, // empty fields as empty string
+    Omit  // empty fields omitted from dictionary
+}
+
 public static class DatFile
 {
     // Path-based
@@ -149,6 +163,7 @@ public sealed record DatFileOptions
     public int ReaderBufferChars { get; init; } = 128 * 1024;
     public int ParseChunkChars   { get; init; } = 128 * 1024;
     public FileStreamOptions File { get; init; } = /* defaults to async + sequential scan, 1 MiB */;
+    public EmptyField EmptyFieldMode { get; init; } = EmptyField.Null;
     public static DatFileOptions Default { get; }
 }
 ```
