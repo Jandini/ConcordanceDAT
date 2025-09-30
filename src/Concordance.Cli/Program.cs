@@ -7,7 +7,7 @@ using Serilog.Sinks.SystemConsole.Themes;
 try
 {
     using var serviceProvider = new ServiceCollection()
-        .AddLogging(builder => builder.AddSerilog(new LoggerConfiguration()            
+        .AddLogging(builder => builder.AddSerilog(new LoggerConfiguration()
             .Enrich.WithStopwatch(string.Empty)
             .Enrich.WithIoMetrics()
             .Enrich.WithMemoryMetrics()
@@ -15,8 +15,8 @@ try
                 theme: AnsiConsoleTheme.Code,
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} ({Stopwatch}) [{Level:u4}] {Message} | Read {IoReadBytes:N0} | Memory {WorkingSetBytes:N0}{NewLine}{Exception}")
             .WriteTo.File($"logs/concordance-{DateTime.Now.ToString("yyyMMdd-HHmmss")}.log",
-                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u4}] {Message}{NewLine} | Elapsed {Stopwatch} | Read {IoReadBytes:N0} | Memory {WorkingSetBytes:N0}{Exception}")
-            .CreateLogger()))
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u4}] {Message} | Elapsed {Stopwatch} | Read {IoReadBytes:N0} | Memory {WorkingSetBytes:N0}{NewLine}{Exception}")
+            .CreateLogger(), dispose: true))
         .AddTransient<Main>()
         .BuildServiceProvider();
 
@@ -26,12 +26,13 @@ try
 
         Console.CancelKeyPress += (sender, eventArgs) =>
         {
-            if (!cancellationTokenSource.IsCancellationRequested) {
+            if (!cancellationTokenSource.IsCancellationRequested)
+            {
                 serviceProvider.GetRequiredService<ILogger<Program>>()
                     .LogWarning("User break (Ctrl+C) detected. Shutting down gracefully...");
-            
+
                 cancellationTokenSource.Cancel();
-                eventArgs.Cancel = true; 
+                eventArgs.Cancel = true;
             }
         };
 
@@ -49,5 +50,3 @@ catch (Exception ex)
 {
     Console.WriteLine(ex.Message);
 }
-
-

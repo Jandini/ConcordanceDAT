@@ -23,7 +23,7 @@ internal class Main(ILogger<Main> logger)
         // Tune parallelism for your storage. Start modestly; measure and adjust.
         var parallel = new ParallelOptions
         {
-            MaxDegreeOfParallelism = 8,
+            MaxDegreeOfParallelism = 1,
             CancellationToken = cancellationToken
         };
 
@@ -79,13 +79,14 @@ internal class Main(ILogger<Main> logger)
         var avgMemoryMB = fileCount > 0 ? totalMemoryMB / fileCount : 0;
         var avgRowsPerSecond = totalSeconds > 0 ? totalRows / totalSeconds : 0;
 
+
+        foreach (var error in errors)
+            logger.LogError("{file:l}: {error:l}", error.Key, error.Value);
+
         logger.LogInformation(
             "Total {count} rows completed in {elapsed} for {files} files ({failed} failed) | Avg WS: {avgMem:N2} MB | Avg Rows/sec: {avgRps:F2}",
             totalRows, totalWatch.Elapsed, fileCount, errors.Count, avgMemoryMB, avgRowsPerSecond
         );
 
-        foreach (var error in errors)
-            logger.LogError("{file:l}: {error:l}", error.Key, error.Value);
-        
     }
 }
