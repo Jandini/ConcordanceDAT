@@ -31,7 +31,7 @@ public static class DatFile
     /// <see cref="Dictionary{TKey, TValue}"/> keyed by header column names.
     /// The header record itself is not yielded.
     /// </returns>
-    public static IAsyncEnumerable<Dictionary<string, string>> ReadAsync(
+    public static IAsyncEnumerable<Dictionary<string, object>> ReadAsync(
         string path,
         CancellationToken cancellationToken = default)
         => ReadAsync(path, DatFileOptions.Default, cancellationToken);
@@ -45,7 +45,7 @@ public static class DatFile
     /// <param name="options">Optional reader options. If null, DatFileOptions.Default is used.</param>
     /// <param name="cancellationToken">Cancellation token to cooperatively cancel the asynchronous enumeration.</param>
     /// <returns>Async sequence of rows as dictionaries keyed by header names. The header row itself is not yielded.</returns>
-    public static async IAsyncEnumerable<Dictionary<string, string>> ReadAsync(
+    public static async IAsyncEnumerable<Dictionary<string, object>> ReadAsync(
         string path,
         DatFileOptions options = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -74,7 +74,7 @@ public static class DatFile
     /// <param name="options">Optional reader options. If null, DatFileOptions.Default is used.</param>
     /// <param name="cancel">Cancellation token to cooperatively cancel the asynchronous enumeration.</param>
     /// <returns>Async sequence of rows as dictionaries keyed by header names. The header row itself is not yielded.</returns>
-    public static async IAsyncEnumerable<Dictionary<string, string>> ReadAsync(
+    public static async IAsyncEnumerable<Dictionary<string, object>> ReadAsync(
         Stream stream,
         DatFileOptions options = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -109,7 +109,7 @@ public static class DatFile
     /// This method uses a pooled char buffer and reuses StringBuilder and List instances across records
     /// to reduce allocations. It also supports cancellation checks on each chunk.
     /// </summary>
-    private static async IAsyncEnumerable<Dictionary<string, string>> GetRowsAsync(
+    private static async IAsyncEnumerable<Dictionary<string, object>> GetRowsAsync(
         StreamReader reader, 
         DatFileOptions options,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
@@ -135,7 +135,7 @@ public static class DatFile
                 field.Clear();
             }
 
-            Dictionary<string, string> EndRecord()
+            Dictionary<string, object> EndRecord()
             {
                 if (headers is null)
                 {
@@ -148,7 +148,7 @@ public static class DatFile
                     throw new FormatException($"Invalid field count: got {fields.Count}, expected {headers.Count}. Each record must match the header column count and end with a line break.");
 
                 var count = headers.Count;
-                var dict = new Dictionary<string, string>(count, StringComparer.OrdinalIgnoreCase);
+                var dict = new Dictionary<string, object>(count, StringComparer.OrdinalIgnoreCase);
 
                 var hSpan = CollectionsMarshal.AsSpan(headers); 
                 var fSpan = CollectionsMarshal.AsSpan(fields);
