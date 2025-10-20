@@ -96,6 +96,120 @@ public static class DatFile
     }
 
     /// <summary>
+    /// Writes a sequence of DAT rows to a filesystem path. Header is inferred from the first dictionary's key order.
+    /// Returns the number of rows written.
+    /// </summary>
+    public static async Task<long> WriteAsync(
+        string path,
+        IAsyncEnumerable<Dictionary<string, object>> rows,
+        DatFileOptions options = null,
+        Encoding encoding = null,
+        long? maxRows = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        ArgumentNullException.ThrowIfNull(rows);
+
+        var opts = (options ?? DatFileOptions.Default).Clamp();
+
+        await using var fs = File.Open(path, opts.File);
+        return await WriteAsync(fs, rows, opts, encoding ?? new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), maxRows, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes a sequence of DAT rows to a stream. Header is inferred from the first dictionary's key order.
+    /// Encoding defaults to UTF-8 with BOM when not specified. Returns number of rows written.
+    /// </summary>
+    public static async Task<long> WriteAsync(
+        Stream stream,
+        IAsyncEnumerable<Dictionary<string, object>> rows,
+        DatFileOptions options = null,
+        Encoding encoding = null,
+        long? maxRows = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        if (!stream.CanWrite) throw new ArgumentException("Stream must be writable.", nameof(stream));
+        ArgumentNullException.ThrowIfNull(rows);
+
+        var opts = (options ?? DatFileOptions.Default).Clamp();
+        encoding ??= new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
+
+        // Use StreamWriter for buffered, encoded writes
+        using var writer = new StreamWriter(stream, encoding, opts.ReaderBufferChars, leaveOpen: false);
+
+        await using var e = rows.GetAsyncEnumerator(cancellationToken);
+        // Obtain header from first row
+        if (!await e.MoveNextAsync().ConfigureAwait(false))
+        {
+            // Nothing to write
+            await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            return 0L;
+        }
+
+        var first = e.Current ?? [];
+        var headers = first.Keys.ToList();
+
+        // Write header record
+        await WriteRecordAsync(writer, headers.Cast<object>().ToList(), cancellationToken).ConfigureAwait(false);
+
+        // Write first row (and subsequent rows)
+        var written = 0L;
+        await WriteRowAsync(writer, headers, first, cancellationToken).ConfigureAwait(false);
+        written++;
+
+        while ((maxRows == null || written < maxRows) && await e.MoveNextAsync().ConfigureAwait(false))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await WriteRowAsync(writer, headers, e.Current ?? new Dictionary<string, object>(0), cancellationToken).ConfigureAwait(false);
+            written++;
+        }
+
+        await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+        return written;
+    }
+
+    private static async Task WriteRowAsync(StreamWriter writer, IReadOnlyList<string> headers, Dictionary<string, object> row, CancellationToken cancellationToken)
+    {
+        var values = new object[headers.Count];
+        for (int i = 0; i < headers.Count; i++)
+        {
+            row.TryGetValue(headers[i], out var v);
+            values[i] = v ?? string.Empty;
+        }
+
+        await WriteRecordAsync(writer, values, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task WriteRecordAsync(StreamWriter writer, IReadOnlyList<object> values, CancellationToken cancellationToken)
+    {
+        var sep = ((char)0x14).ToString();
+        var quote = ((char)0xFE).ToString();
+        var doubleQuote = new string((char)0xFE, 2);
+
+        for (int i = 0; i < values.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var raw = values[i]?.ToString() ?? string.Empty;
+            // Escape qualifier by doubling it
+            if (raw.IndexOf((char)0xFE) >= 0)
+                raw = raw.Replace(quote, doubleQuote);
+
+            await writer.WriteAsync(quote).ConfigureAwait(false);
+            if (raw.Length > 0)
+                await writer.WriteAsync(raw).ConfigureAwait(false);
+            await writer.WriteAsync(quote).ConfigureAwait(false);
+
+            if (i + 1 < values.Count)
+                await writer.WriteAsync(sep).ConfigureAwait(false);
+        }
+
+        await writer.WriteAsync("\r\n").ConfigureAwait(false);
+    }
+
+
+    /// <summary>
     /// Parses the text provided by the StreamReader and yields records as dictionaries.
     /// The first record parsed is treated as the header and is not yielded.
     ///
