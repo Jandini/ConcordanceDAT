@@ -18,6 +18,7 @@ try
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u4}] {Message} | Elapsed {Stopwatch} | Read {IoReadBytes:N0} | Memory {WorkingSetBytes:N0}{NewLine}{Exception}")
             .CreateLogger(), dispose: true))
         .AddTransient<Main>()
+        .AddTransient<SplitDat>()
         .BuildServiceProvider();
 
     try

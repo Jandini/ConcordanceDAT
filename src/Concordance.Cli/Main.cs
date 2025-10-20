@@ -2,9 +2,13 @@
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Text;
 
-internal class Main(ILogger<Main> logger)
+internal class Main(ILogger<Main> logger, SplitDat splitter)
 {
+    private readonly SplitDat _splitter = splitter;
+
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         // Discover input files
@@ -27,9 +31,26 @@ internal class Main(ILogger<Main> logger)
             CancellationToken = cancellationToken
         };
 
+        // Example: split the first file into multiple files with up to 10,000 rows each using DI service
+        if (datFiles.Length > 0)
+        {
+            var first = datFiles[0];
+            var outDir = Path.Combine(Path.GetDirectoryName(first) ?? ".", "splits");
+            logger.LogInformation("Splitting {file} into chunks of {max} rows in {out}", first, 10000, outDir);
+            try
+            {
+                await _splitter.RunAsync(first, outDir, 10_000, cancellationToken: cancellationToken);
+                logger.LogInformation("Split complete for {file}", first);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to split {file}", first);
+            }
+        }
+
         await Parallel.ForEachAsync(datFiles, parallel, async (datFile, ct) =>
         {
-       
+
             logger.LogInformation("Reading {file}", datFile);
 
             var header = await DatFile.GetHeaderAsync(datFile, ct);
