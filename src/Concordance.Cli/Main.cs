@@ -80,6 +80,7 @@ internal class Main(ILogger<Main> logger)
             }
         });
 
+
         totalWatch.Stop();
 
         var avgMemoryMB = fileCount > 0 ? totalMemoryMB / fileCount : 0;
