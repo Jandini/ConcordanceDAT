@@ -29,14 +29,19 @@ internal class Main(ILogger<Main> logger)
 
         await Parallel.ForEachAsync(datFiles, parallel, async (datFile, ct) =>
         {
-       
+            var sw = Stopwatch.StartNew();
             logger.LogInformation("Reading {file}", datFile);
 
-            var header = await DatFile.GetHeaderAsync(datFile, ct);
-
-            logger.LogInformation("Found {count} fields in the header.", header.Count);
-
-            var sw = Stopwatch.StartNew();
+            try
+            {
+                var (header, rowCount) = await DatFile.GetCountAsync(datFile, ct);
+                logger.LogInformation("Found {FieldCound} fields in the header with {RowCount} rows.", header.Count, rowCount);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error counting rows in {file}", datFile);
+            }            
+           
             var lastProgressUpdate = Stopwatch.StartNew();
             int rowNumber = 0;
 
@@ -64,6 +69,7 @@ internal class Main(ILogger<Main> logger)
                 {
                     totalRows += rowNumber;
                     totalSeconds += seconds;
+             
                     fileCount++;
                 }
             }
@@ -73,6 +79,7 @@ internal class Main(ILogger<Main> logger)
                 logger.LogError(ex, "Error in {file} at row {row}", datFile, rowNumber);
             }
         });
+
 
         totalWatch.Stop();
 

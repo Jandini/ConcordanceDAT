@@ -403,6 +403,179 @@ public static class DatFile
         }
     }
 
+    /// <summary>
+    /// Reads the header and optionally counts data rows in a Concordance DAT file (by path).
+    /// When <paramref name="countRows"/> is true the file is scanned (without allocating per-row dictionaries)
+    /// to validate records and return the total data row count. Returns a tuple of header and row count.
+    /// </summary>
+    /// <param name="path">File system path to a Concordance DAT file.</param>
+    /// <param name="countRows">If true, continue scanning the file after the header to count data rows.</param>
+    /// <param name="cancellationToken">Cancellation token to cooperatively cancel the operation.</param>
+    /// <returns>A tuple containing the header field names and the number of data rows in the file.</returns>
+    public static async Task<(IReadOnlyList<string> Header, long RowCount)> GetCountAsync(
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+
+        var opts = DatFileOptions.Default.Clamp();
+        await using var fs = File.Open(path, opts.File);
+        var encoding = DetectEncoding(fs);
+        using var reader = new StreamReader(fs, encoding, detectEncodingFromByteOrderMarks: false, bufferSize: opts.ReaderBufferChars, leaveOpen: false);
+        return await GetCountAsync(reader, opts, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads the header and optionally counts data rows from a Concordance DAT stream.
+    /// When <paramref name="countRows"/> is true the stream is scanned (without allocating per-row dictionaries)
+    /// to validate records and return the total data row count. The stream must be readable and seekable
+    /// for encoding detection.
+    /// </summary>
+    /// <param name="stream">Readable, seekable stream positioned at the start of a Concordance DAT file.</param>
+    /// <param name="countRows">If true, continue scanning the file after the header to count data rows.</param>
+    /// <param name="cancellationToken">Cancellation token to cooperatively cancel the operation.</param>
+    /// <returns>A tuple containing the header field names and the number of data rows in the stream.</returns>
+    public static async Task<(IReadOnlyList<string> Header, long RowCount)> GetCountAsync(
+        Stream stream,        
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        if (!stream.CanRead) throw new ArgumentException("Stream must be readable.", nameof(stream));
+
+        var opts = DatFileOptions.Default.Clamp();
+        var encoding = DetectEncoding(stream);
+        using var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: false, bufferSize: opts.ReaderBufferChars, leaveOpen: false);
+        return await GetCountAsync(reader, opts, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Shared helper: parse header and optionally count rows using exactly the same state machine as GetRowsAsync
+    private static async Task<(IReadOnlyList<string> Header, long RowCount)> GetCountAsync(
+        StreamReader reader,
+        DatFileOptions options,       
+        CancellationToken cancellationToken)
+    {
+        var pool = ArrayPool<char>.Shared;
+        var buffer = pool.Rent(options.ParseChunkChars);
+        var rowCount = 0L;
+        try
+        {
+            var sep = (char)0x14;   // Column separator
+            var quote = (char)0xFE; // Field quote
+            var empty = options.EmptyFieldMode;
+
+            var inQuotes = false;   // True when inside a quoted field
+            var lastWasCR = false;  // True if last char was CR and we need to check for CRLF across chunks
+
+            var field = new StringBuilder(8192);  // Accumulates the current field text
+            var fields = new List<string>(128);   // Collects fields for the current record
+            List<string> headers = null;          // Captured from the first record
+
+            void EndField()
+            {
+                // do not store field value after header is obtained
+                fields.Add(headers is null ? field.ToString() : null);
+                field.Clear();
+            }
+
+            void EndRecord()
+            {
+                if (headers is null)
+                {
+                    headers = [.. fields];
+                    fields.Clear();
+                }
+                else
+                {
+                    rowCount++;
+
+                    if (fields.Count != headers.Count)
+                        throw new FormatException($"Invalid field count in row {rowCount}: got {fields.Count}, expected {headers.Count}. Each record must match the header column count and end with a line break.");
+                   
+                    fields.Clear();
+                }
+            }
+
+            int read;
+            while ((read = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
+            {
+                for (int i = 0; i < read; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    char ch = buffer[i];
+
+                    if (lastWasCR)
+                    {
+                        lastWasCR = false;
+                        if (ch == '\n' && !inQuotes)
+                        {
+                            EndField();
+                            EndRecord();                            
+                            continue; // consume LF of CRLF
+                        }
+                        else
+                        {
+                            field.Append('\r'); // CR was data
+                        }
+                    }
+
+                    if (ch == quote)
+                    {
+                        if (inQuotes && i + 1 < read && buffer[i + 1] == quote)
+                        {
+                            field.Append(quote); // escaped quote
+                            i++;
+                        }
+                        else
+                        {
+                            inQuotes = !inQuotes; // toggle quote state
+                        }
+                    }
+                    else if (!inQuotes && ch == sep)
+                    {
+                        EndField();
+                    }
+                    else if (!inQuotes && ch == '\n')
+                    {
+                        EndField();
+                        EndRecord();                        
+                    }
+                    else if (ch == '\r')
+                    {
+                        if (!inQuotes)
+                            lastWasCR = true; // might be CRLF
+                        else
+                            field.Append('\r'); // literal CR inside quotes
+                    }
+                    else
+                    {
+                        if (headers is null)
+                            field.Append(ch); // accumulate header fields
+                    }
+                }
+            }
+
+            // Handle trailing CR as a record terminator.
+            if (lastWasCR && !inQuotes)
+            {
+                EndField();
+                EndRecord();                
+            }
+
+            // Flush any remaining data as the final record (handles missing trailing newline).
+            if (field.Length > 0 || fields.Count > 0)
+            {
+                EndField();
+                EndRecord();                
+            }
+
+            return (headers, rowCount);
+        }
+        finally
+        {
+            pool.Return(buffer);
+        }
+    }
 
     /// <summary>
     /// Detects text encoding for a Concordance DAT stream and positions the stream correctly relative to any BOM.

@@ -122,6 +122,33 @@ Returns a read-only list of field names in file order. Throws `FormatException` 
 
 ---
 
+## Memory-Efficient File Validation
+
+The `GetCountAsync` method provides a memory-efficient way to validate DAT files:
+
+- Parses the entire file using the same exact rules as `ReadAsync`
+- Returns both header fields and total row count in one pass
+- Validates that every row has the correct number of fields
+- Uses minimal memory since it doesn't create dictionaries for rows
+
+Example usage for validation:
+
+```csharp
+using Concordance.Dat;
+
+try 
+{
+    var (header, rowCount) = await DatFile.GetCountAsync("large.dat");
+    Console.WriteLine($"File is valid with {header.Count} columns and {rowCount} rows");
+}
+catch (FormatException ex)
+{
+    Console.WriteLine($"File validation failed: {ex.Message}");
+}
+```
+
+---
+
 ## API surface
 
 ```csharp
@@ -153,6 +180,16 @@ public static class DatFile
 
     // Header-only (stream)
     public static Task<IReadOnlyList<string>> GetHeaderAsync(
+        Stream stream,
+        CancellationToken cancellationToken = default);
+
+    // Count and validate (path)
+    public static Task<(IReadOnlyList<string> Header, long RowCount)> GetCountAsync(
+        string path,
+        CancellationToken cancellationToken = default);
+
+    // Count and validate (stream)
+    public static Task<(IReadOnlyList<string> Header, long RowCount)> GetCountAsync(
         Stream stream,
         CancellationToken cancellationToken = default);
 }
