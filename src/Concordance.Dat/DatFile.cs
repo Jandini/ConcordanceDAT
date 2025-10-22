@@ -104,7 +104,6 @@ public static class DatFile
         IAsyncEnumerable<Dictionary<string, object>> rows,
         DatFileOptions options = null,
         Encoding encoding = null,
-        long? maxRows = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
@@ -113,7 +112,7 @@ public static class DatFile
         var opts = (options ?? DatFileOptions.Default).Clamp();
 
         await using var fs = File.Open(path, opts.File);
-        return await WriteAsync(fs, rows, opts, encoding ?? new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), maxRows, cancellationToken).ConfigureAwait(false);
+        return await WriteAsync(fs, rows, opts, encoding ?? new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -125,7 +124,6 @@ public static class DatFile
         IAsyncEnumerable<Dictionary<string, object>> rows,
         DatFileOptions options = null,
         Encoding encoding = null,
-        long? maxRows = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -147,7 +145,7 @@ public static class DatFile
             return 0L;
         }
 
-        var first = e.Current ?? [];
+        var first = e.Current ?? new Dictionary<string, object>(0);
         var headers = first.Keys.ToList();
 
         // Write header record
@@ -158,7 +156,7 @@ public static class DatFile
         await WriteRowAsync(writer, headers, first, cancellationToken).ConfigureAwait(false);
         written++;
 
-        while ((maxRows == null || written < maxRows) && await e.MoveNextAsync().ConfigureAwait(false))
+        while (await e.MoveNextAsync().ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
             await WriteRowAsync(writer, headers, e.Current ?? new Dictionary<string, object>(0), cancellationToken).ConfigureAwait(false);
