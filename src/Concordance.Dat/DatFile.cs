@@ -472,7 +472,8 @@ public static class DatFile
 
             void EndField()
             {
-                fields.Add(field.ToString());
+                // do not store field value after header is obtained
+                fields.Add(headers is null ? field.ToString() : null);
                 field.Clear();
             }
 
@@ -548,7 +549,8 @@ public static class DatFile
                     }
                     else
                     {
-                        field.Append(ch);
+                        if (headers is null)
+                            field.Append(ch); // accumulate header fields
                     }
                 }
             }

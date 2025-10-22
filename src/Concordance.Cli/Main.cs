@@ -23,7 +23,7 @@ internal class Main(ILogger<Main> logger)
         // Tune parallelism for your storage. Start modestly; measure and adjust.
         var parallel = new ParallelOptions
         {
-            MaxDegreeOfParallelism = 8,
+            MaxDegreeOfParallelism = 1,
             CancellationToken = cancellationToken
         };
 
