@@ -407,16 +407,16 @@ public static class DatFile
     /// Reads the header and counts data rows in a Concordance DAT file.
     /// </summary>
     /// <param name="path">File system path to a Concordance DAT file.</param>
+    /// <param name="cancellationToken">Cancellation token to cooperatively cancel the operation.</param>
     /// <param name="progress">
     /// Optional progress callback that receives (header fields, current row count) updates and returns the number of rows to process before next update.
     /// Always called when header is available (row count = 0) and when counting completes.
     /// </param>
-    /// <param name="cancellationToken">Cancellation token to cooperatively cancel the operation.</param>
     /// <returns>A tuple containing the header field names and the number of data rows in the file.</returns>
     public static async Task<(IReadOnlyList<string> Header, long RowCount)> GetCountAsync(
-        string path,
-        Func<IReadOnlyList<string>, long, int> progress = null,
-        CancellationToken cancellationToken = default)
+        string path,        
+        CancellationToken cancellationToken = default,
+        Func<IReadOnlyList<string>, long, int> progress = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
 
