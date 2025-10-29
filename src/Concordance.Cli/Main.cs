@@ -34,7 +34,7 @@ internal class Main(ILogger<Main> logger)
 
             try
             {
-                var (header, rowCount) = await DatFile.GetCountAsync(datFile, ct);
+                var (header, rowCount) = await DatFile.GetCountAsync(datFile, null, ct);
                 logger.LogInformation("Found {FieldCound} fields in the header with {RowCount} rows.", header.Count, rowCount);
             }
             catch (Exception ex)
