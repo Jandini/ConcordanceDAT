@@ -460,24 +460,24 @@ public static class DatFile
     {
         var pool = ArrayPool<char>.Shared;
         var buffer = pool.Rent(options.ParseChunkChars);
-        var rowCount = 0L;
-        var nextUpdate = 1L; // Always report first progress (header)
+        long rowCount =0;
+        long nextUpdate =1; // will be set when header is parsed
         try
         {
-            var sep = (char)0x14;   // Column separator
+            var sep = (char)0x14; // Column separator
             var quote = (char)0xFE; // Field quote
             var empty = options.EmptyFieldMode;
 
-            var inQuotes = false;// True when inside a quoted field
-            var lastWasCR = false;  // True if last char was CR and we need to check for CRLF across chunks
+            var inQuotes = false; // True when inside a quoted field
+            var lastWasCR = false; // True if last char was CR and we need to check for CRLF across chunks
 
-            var field = new StringBuilder(8192);  // Accumulates the current field text
-            var fields = new List<string>(128);   // Collects fields for the current record
-            List<string> headers = null;    // Captured from the first record
+            var field = new StringBuilder(8192); // Accumulates the current field text
+            var fields = new List<string>(128); // Collects fields for the current record
+            IReadOnlyList<string> headers = null; // Captured from the first record (as IReadOnlyList)
 
             void EndField()
             {
-                // do not store field value after header is obtained
+                // store actual text only while building the header; after header is captured we store null placeholders
                 fields.Add(headers is null ? field.ToString() : null);
                 field.Clear();
             }
@@ -486,11 +486,20 @@ public static class DatFile
             {
                 if (headers is null)
                 {
+                    // first record is header - materialize to array and keep as IReadOnlyList
                     headers = [.. fields];
                     fields.Clear();
 
-                    // Always notify when header is available
-                    nextUpdate = progress?.Invoke(headers.AsReadOnly(), 0) ?? 1;
+                    // Always notify when header is available and determine first update interval
+                    if (progress is not null)
+                    {
+                        var interval = progress(headers,0);
+                        nextUpdate = Math.Max(1L, (long)interval);
+                    }
+                    else
+                    {
+                        nextUpdate = long.MaxValue;
+                    }
                 }
                 else
                 {
@@ -499,12 +508,11 @@ public static class DatFile
                     if (fields.Count != headers.Count)
                         throw new FormatException($"Invalid field count in row {rowCount}: got {fields.Count}, expected {headers.Count}. Each record must match the header column count and end with a line break.");
 
-                    // Check if we should notify progress
-                    if (rowCount == nextUpdate)
+                    // Notify progress if we've reached the next update point
+                    if (progress is not null && rowCount >= nextUpdate)
                     {
-                        // Get rows until next update (default to 1 if callback returns <= 0)
-                        var interval = progress?.Invoke(headers.AsReadOnly(), rowCount) ?? 1;
-                        nextUpdate = rowCount + Math.Max(1, interval);
+                        var interval = progress(headers, rowCount);
+                        nextUpdate = rowCount + Math.Max(1L, (long)interval);
                     }
 
                     fields.Clear();
@@ -512,9 +520,9 @@ public static class DatFile
             }
 
             int read;
-            while ((read = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
+            while ((read = await reader.ReadAsync(buffer,0, buffer.Length).ConfigureAwait(false)) >0)
             {
-                for (int i = 0; i < read; i++)
+                for (int i =0; i < read; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
@@ -537,7 +545,7 @@ public static class DatFile
 
                     if (ch == quote)
                     {
-                        if (inQuotes && i + 1 < read && buffer[i + 1] == quote)
+                        if (inQuotes && i +1 < read && buffer[i +1] == quote)
                         {
                             field.Append(quote); // escaped quote
                             i++;
@@ -566,7 +574,7 @@ public static class DatFile
                     else
                     {
                         if (headers is null)
-                            field.Append(ch); // accumulate header fields
+                            field.Append(ch); // accumulate header fields only until header captured
                     }
                 }
             }
@@ -579,17 +587,20 @@ public static class DatFile
             }
 
             // Flush any remaining data as the final record (handles missing trailing newline).
-            if (field.Length > 0 || fields.Count > 0)
+            if (field.Length >0 || fields.Count >0)
             {
                 EndField();
                 EndRecord();
             }
 
-            // Always notify on completion if we processed any rows after last update
-            if (rowCount > 0 && rowCount >= nextUpdate)
-                progress?.Invoke(headers.AsReadOnly(), rowCount);
+            // Final progress notification (always call once on completion if progress provided)
+            if (progress is not null && headers is not null)
+                progress(headers, rowCount);
 
-            return (headers.AsReadOnly(), rowCount);
+            if (headers is null)
+                throw new FormatException("Empty or invalid Concordance DAT. Header row not found.");
+
+            return (headers, rowCount);
         }
         finally
         {
